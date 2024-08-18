@@ -33,9 +33,13 @@ def get_google_services():
     return sheets_service, drive_service
 
 
-def get_column_values(service, spreadsheet_id, sheet_name, column_letter, max_rows=1000):
+def get_column_values(service, spreadsheet_id, sheet_name, start_column, end_column=None, max_rows=1000):
     try:
-        range_name = f"'{sheet_name}'!{column_letter}2:{column_letter}{max_rows}"
+        if end_column:
+            range_name = f"'{sheet_name}'!{start_column}2:{end_column}{max_rows}"
+        else:
+            range_name = f"'{sheet_name}'!{start_column}2:{start_column}{max_rows}"
+        
         result = service.spreadsheets().values().get(
             spreadsheetId=spreadsheet_id,
             range=range_name
@@ -43,10 +47,29 @@ def get_column_values(service, spreadsheet_id, sheet_name, column_letter, max_ro
         values = result.get('values', [])
         if not values:
             return []
-        return list(set([item[0] for item in values if item]))  # Get unique values
+        
+        if end_column:
+            return values
+        else:
+            return list(set([item[0] for item in values if item]))  # Get unique values
     except HttpError as error:
         st.error(f"An error occurred: {error}")
         return []
+    
+def find_associated_helpers(service, spreadsheet_id, knowledge_file):
+    helpers_data = get_column_values(service, spreadsheet_id, 'Current Helpers', 'A', 'F')
+    associated_helpers = set()  # Using a set instead of a list to avoid duplicates
+    
+    for row in helpers_data:
+        if len(row) >= 6:  # Ensure the row has enough columns
+            helper_name = row[0]
+            knowledge_file_list = row[5]
+            if knowledge_file_list:
+                files = [file.strip() for file in knowledge_file_list.split(',')]
+                if knowledge_file in files:
+                    associated_helpers.add(helper_name)  # Add to set instead of appending to list
+    
+    return sorted(list(associated_helpers))  # Convert set to sorted list before returning
 
 def get_latest_entry(service, spreadsheet_id, sheet_name, helper_name=None, helper_type=None, gai=None):
     range_name = f"'{sheet_name}'!A2:I1000"  # Adjust the range as needed
@@ -319,6 +342,15 @@ def main():
                     st.markdown(f"[Open {selected_file} in Google Docs]({file_url})")
                 else:
                     st.warning(f"File '{selected_file}' not found in the specified folder.")
+
+                # Find and display associated helpers
+                associated_helpers = find_associated_helpers(sheets_service, spreadsheet_id, selected_file)
+                if associated_helpers:
+                    st.subheader("Associated Helpers:")
+                    for helper in associated_helpers:
+                        st.write(f"- {helper}")
+                else:
+                    st.info("No helpers are currently associated with this knowledge file.")
 
                 change = st.text_area('Enter Change Description')
 
